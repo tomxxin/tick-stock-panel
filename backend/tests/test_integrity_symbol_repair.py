@@ -100,7 +100,12 @@ def _offline_env(tmp_path, monkeypatch):
     from app.tickflow.repository import DataStore, KlineRepository
 
     monkeypatch.setattr(app_settings, "data_dir", tmp_path)
-    monkeypatch.setattr(instrument_sync, "sync_instruments", lambda data_dir: 0)
+    monkeypatch.setattr(
+        instrument_sync, "sync_instruments_result",
+        lambda data_dir: instrument_sync.InstrumentSyncResult(
+            0, False, "ok", message="个股维表同步完成,0 只标的",
+        ),
+    )
     calls: list[dict] = []
     knobs = {"fail": [], "fix": [], "fix_day": TODAY, "keep": []}
 

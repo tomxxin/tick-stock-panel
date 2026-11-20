@@ -36,7 +36,12 @@ def test_pipeline_daily_window_ends_on_beijing_today(monkeypatch, tmp_path) -> N
         raise _StopError()
 
     monkeypatch.setattr(daily_pipeline, "cn_today", lambda: BJ, raising=False)
-    monkeypatch.setattr(instrument_sync, "sync_instruments", lambda data_dir: 0)
+    monkeypatch.setattr(
+        instrument_sync, "sync_instruments_result",
+        lambda data_dir: instrument_sync.InstrumentSyncResult(
+            0, False, "ok", message="个股维表同步完成,0 只标的",
+        ),
+    )
     monkeypatch.setattr(daily_pipeline, "_resolve_universe", lambda capset, repo=None: ["600000.SH"])
     monkeypatch.setattr(daily_pipeline, "_invalidate", lambda table=None: None)
     monkeypatch.setattr(kline_sync, "sync_and_persist_daily_batch", fake_batch)

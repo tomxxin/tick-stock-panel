@@ -193,7 +193,12 @@ def test_pruned_interior_date_is_rebuilt_without_new_daily_or_factors(tmp_path, 
         "pipeline_pull_a_share": False, "pipeline_regime_enabled": False,
         "minute_sync_enabled": False, "adj_factor_provider": "tickflow",
     })
-    monkeypatch.setattr(daily_pipeline.instrument_sync, "sync_instruments", lambda *_: 0)
+    monkeypatch.setattr(
+        daily_pipeline.instrument_sync, "sync_instruments_result",
+        lambda *_: daily_pipeline.instrument_sync.InstrumentSyncResult(
+            0, False, "ok", message="个股维表同步完成,0 只标的",
+        ),
+    )
     monkeypatch.setattr(daily_pipeline, "_resolve_universe", lambda *_: [])
     monkeypatch.setattr(daily_pipeline, "_invalidate", lambda *_: None)
     monkeypatch.setattr(daily_pipeline, "_refresh_single_view", lambda *_: None)
