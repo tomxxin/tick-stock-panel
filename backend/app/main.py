@@ -260,6 +260,12 @@ async def _application_lifespan(app: FastAPI):
         logger.warning("scheduler not started: %s", e)
         app.state.scheduler = None
 
+    try:
+        from app.services import auction_scan
+        auction_scan.run_catchup()
+    except Exception as e:  # noqa: BLE001
+        logger.warning("auction scan catchup failed: %s", e)
+
     # depth sealed: 启动补跑(当天文件不存在) + 盘中轮询(有能力时)
     try:
         depth_service.boot_check()

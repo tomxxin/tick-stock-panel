@@ -649,6 +649,26 @@ def set_pipeline_schedule(hour: int, minute: int) -> dict:
     return {"hour": h, "minute": m}
 
 
+def get_auction_scan_settings() -> dict:
+    """全市场竞价扫描偏好。旧文件缺字段时使用默认值。"""
+    data = load()
+    enabled = data.get("auction_scan_enabled", True)
+    return {
+        "enabled": enabled if isinstance(enabled, bool) else True,
+        "min_pct": float(data.get("auction_scan_min_pct", 5)),
+        "min_volume_ratio": float(data.get("auction_scan_min_volume_ratio", 10)),
+    }
+
+
+def set_auction_scan_settings(*, enabled: bool, min_pct: float, min_volume_ratio: float) -> dict:
+    save({
+        "auction_scan_enabled": bool(enabled),
+        "auction_scan_min_pct": float(min_pct),
+        "auction_scan_min_volume_ratio": float(min_volume_ratio),
+    })
+    return get_auction_scan_settings()
+
+
 def get_instruments_schedule() -> dict:
     """返回盘前标的维表调度时间 {"hour": 9, "minute": 10}。"""
     d = load().get("instruments_schedule", {"hour": 9, "minute": 10})

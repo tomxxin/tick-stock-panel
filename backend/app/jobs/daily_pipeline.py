@@ -1423,6 +1423,19 @@ def start_scheduler(repo: KlineRepository, capset: CapabilitySet) -> AsyncIOSche
         replace_existing=True,
     )
 
+    # 09:26 只负责叫醒。是否交易日、是否还在 10:30 前，由采集函数自己判断。
+    def _auction_scan():
+        from app.services import auction_scan
+        return auction_scan.run_scheduled()
+
+    scheduler.add_job(
+        _auction_scan,
+        trigger=CronTrigger(day_of_week="mon-fri", hour=9, minute=26, timezone="Asia/Shanghai"),
+        id="auction_scan",
+        misfire_grace_time=64 * 60,
+        replace_existing=True,
+    )
+
     # 周期性能力重探: 付费 Key 中途过期/续费无需重启即可被发现。
     # 只热更新 app.state.capabilities(API 端点、盘后管道 _pipeline_then_refresh 均读它);
     # 档位变化记 WARNING, 让「Key 失效」在日志/前端可见, 不再静默按旧档位打 403 端点。

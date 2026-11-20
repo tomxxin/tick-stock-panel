@@ -11,6 +11,7 @@ import {
   type IntradaySignalKey,
 } from '@/lib/api'
 import { QK } from '@/lib/queryKeys'
+import { presentAuctionScan } from '@/custom/abnormal/auctionScan'
 import { storage } from '@/lib/storage'
 import { toNavItems, type NavItem } from '@/lib/listNav'
 import { fmtPrice, fmtPct, priceColorClass } from '@/lib/format'
@@ -161,6 +162,116 @@ export function AbnormalMoves() {
 // 竞价异动 tab
 // ================================================================
 
+function AuctionScanCard({ onOpenStock }: {
+  onOpenStock: (symbol: string, name?: string, navList?: NavItem[]) => void
+}) {
+  const scan = useQuery({
+    queryKey: ['auction-scan', 'today'],
+    queryFn: () => api.auctionScan(),
+    staleTime: 30_000,
+    retry: 1,
+  })
+  const [minPct, setMinPct] = useState('5')
+  const [minRatio, setMinRatio] = useState('10')
+  const [enabled, setEnabled] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const data = scan.data
+  const view = data ? presentAuctionScan(data) : null
+  const navItems = useMemo(
+    () => toNavItems((view?.todayRows ?? []).map(row => ({ symbol: row.thscode, name: row.name }))),
+    [view],
+  )
+
+  useEffect(() => {
+    if (!data?.settings) return
+    setEnabled(data.settings.enabled)
+    setMinPct(String(data.settings.min_pct))
+    setMinRatio(String(data.settings.min_volume_ratio))
+  }, [data?.settings])
+
+  const save = async () => {
+    setSaving(true)
+    try {
+      await api.auctionScanSettings({
+        enabled,
+        min_pct: Number(minPct),
+        min_volume_ratio: Number(minRatio),
+      })
+      await scan.refetch()
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="rounded-card border border-border bg-surface/80 px-4 py-3">
+      <div className="flex items-center gap-2">
+        <Radar className="h-4 w-4 text-muted" />
+        <span className="text-xs font-medium text-foreground">全市场竞价扫描</span>
+        {scan.isFetching && <span className="text-[10px] text-muted">更新中…</span>}
+        <button
+          type="button"
+          className="ml-auto text-[10px] text-accent hover:underline"
+          onClick={async () => { await api.auctionScanRun(); await scan.refetch() }}
+        >
+          手动采集
+        </button>
+      </div>
+      <p className="mt-1 text-[11px] text-foreground">{view?.headline ?? '正在读取采集状态'}</p>
+      <p className="mt-0.5 text-[10px] text-muted">{view?.coverageText}</p>
+      {data?.last_run?.error_code === 2003 && (
+        <Link to={data.settings_href || '/settings?tab=data-sources'} className="mt-1 inline-block text-[10px] text-accent hover:underline">
+          当前 Key 无权调用集合竞价快照，前往数据源设置
+        </Link>
+      )}
+      <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px] text-muted">
+        <label className="inline-flex items-center gap-1">
+          <input type="checkbox" checked={enabled} onChange={event => setEnabled(event.target.checked)} />
+          交易日 09:26 自动采集
+        </label>
+        <label className="inline-flex items-center gap-1">
+          高开 ≥
+          <input value={minPct} onChange={event => setMinPct(event.target.value)} className="w-12 rounded border border-border bg-base px-1 py-0.5 text-foreground" />
+          %
+        </label>
+        <label className="inline-flex items-center gap-1">
+          量比 ≥
+          <input value={minRatio} onChange={event => setMinRatio(event.target.value)} className="w-12 rounded border border-border bg-base px-1 py-0.5 text-foreground" />
+        </label>
+        <button type="button" onClick={save} disabled={saving} className="text-accent hover:underline">
+          保存筛选
+        </button>
+      </div>
+      <p className="mt-1 text-[10px] leading-relaxed text-muted">
+        竞价涨跌幅按百分数原值比较，竞价量比和竞价成交量按接口原值显示，不换算单位。改筛选只读取已保存的当日快照。
+      </p>
+      {view && view.todayRows.length > 0 && (
+        <div className="mt-2 border-t border-border/60">
+          {view.todayRows.map(row => (
+            <button
+              key={row.thscode}
+              type="button"
+              className="flex w-full items-center gap-2 border-b border-border/30 py-1.5 text-left text-[11px] hover:bg-accent/[0.05]"
+              onClick={() => onOpenStock(row.thscode, row.name ?? undefined, navItems)}
+            >
+              <span className="w-16 font-mono">{row.auction_pct == null ? '—' : fmtPct(row.auction_pct / 100)}</span>
+              <span className="min-w-0 flex-1 truncate">{row.name ?? row.thscode}</span>
+              <span className="font-mono text-[10px] text-muted">{row.thscode}</span>
+              <span className="font-mono text-[10px] text-muted">量比 {row.auction_volume_ratio ?? '—'}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      {view?.unverifiedLabel && (
+        <div className="mt-2 rounded border border-warning/30 bg-warning/10 px-2 py-1.5 text-[10px] text-warning">
+          {view.unverifiedLabel}
+          {view.unverifiedRows.length > 0 ? ` · ${view.unverifiedRows.length} 只，不计入今日有效结果` : ''}
+        </div>
+      )}
+    </div>
+  )
+}
+
 /** 追高风险阈值: 60日回测高开≥5%子集当日开盘买 -1.97% (温和高开才是名单 alpha 来源) */
 const _BENCH_CHASE_RISK_PCT = 5
 
@@ -203,27 +314,7 @@ function AuctionView({ onOpenStock }: {
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 overflow-y-auto">
       <BenchmarkCard q={q} onOpenStock={onOpenStock} />
-
-      {/* 全市场竞价扫描: 采集任务启用后填充 (接口与批量能力已验证) */}
-      <div className="rounded-card border border-dashed border-border bg-surface/50 px-4 py-4">
-        <div className="flex items-start gap-3">
-          <span className="grid h-8 w-8 shrink-0 place-items-center rounded bg-elevated/60">
-            <Radar className="h-4 w-4 text-muted/50" />
-          </span>
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-medium text-foreground">全市场竞价扫描</span>
-              <span className="rounded-full border border-border bg-elevated px-2 py-px text-[9px] leading-tight text-muted">
-                待采集任务启用
-              </span>
-            </div>
-            <p className="mt-1.5 text-[11px] leading-relaxed text-muted">
-              9:25 竞价终态后扫描全市场 (实测 5547 只约 2 秒), 自动筛出高开 ≥5% 且竞价量比 ≥10
-              的标的并按日落盘积累历史。竞价明细无历史接口, 数据从采集启用之日起积累。
-            </p>
-          </div>
-        </div>
-      </div>
+      <AuctionScanCard onOpenStock={onOpenStock} />
 
       <p className="px-1 text-[10px] leading-relaxed text-muted/70">
         风向标为同花顺盘前竞价筛选名单 (每日约 5~6 只)。60 日回测: 名单当日开盘买入均值 +0.54%
