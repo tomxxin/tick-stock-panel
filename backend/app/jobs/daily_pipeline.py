@@ -164,20 +164,25 @@ def _resolve_universe(capset: CapabilitySet, repo=None) -> list[str]:
     return sorted(base)
 
 
-def run_instruments_sync(repo: KlineRepository) -> dict:
+def run_instruments_sync(
+    repo: KlineRepository,
+    on_progress: ProgressCb | None = None,
+) -> dict:
     """盘前同步个股维表。
 
-    维表含当日涨跌停价 (limit_up/down), 同步完成后刷新 enriched 内存缓存,
-    确保跨天后连板梯队/策略等读到的是基于最新维表的数据 (而非前一交易日残留)。
+    维表含当日涨跌停价 (limit_up/down)。写盘后刷新 instruments 视图;
+    有新快照时再重建 enriched 内存缓存, 避免跨天后仍用前一交易日的维表。
+    部分失败或全部失败会抛出 RuntimeError, 调用方不得把它记成成功。
     """
-    rows = instrument_sync.sync_instruments(repo.store.data_dir)
-    _refresh_instruments_view(repo)
-    _invalidate("instruments")
-    # 维表更新后重建 enriched 缓存 (clear + refresh, 与设置页「清理并刷新」同等效果)
-    if rows > 0:
+    emit = on_progress or _noop
+    payload = _sync_stock_instruments(repo, emit, stage_errors=None, start_pct=2, done_pct=90)
+    if payload["written"]:
         repo.clear_cache()
         repo.refresh_cache()
-    return {"instruments_rows": rows}
+    if payload["status"] != "ok":
+        raise RuntimeError(payload["message"])
+    emit("done", 100, payload["message"])
+    return payload
 
 
 def run_now(
@@ -204,13 +209,9 @@ def run_now(
     # 管道末尾若非空则抛 PipelineStageError, 让任务终态如实标记为 failed(而非误报成功)。
     stage_errors: list[str] = []
 
-    # Step 0: 先同步个股维表, 再解析标的池 — 确保标的池基于最新 instruments
-    emit("sync_instruments", 2, "同步个股维表…")
-    inst_rows = instrument_sync.sync_instruments(repo.store.data_dir)
-    if inst_rows > 0:
-        _refresh_instruments_view(repo)
-    emit("sync_instruments", 8, f"个股维表同步完成,{inst_rows} 只标的")
-    _invalidate("instruments")
+    # Step 0: 先同步个股维表, 再解析标的池 — 确保标的池基于最新 instruments。
+    # 单市场失败不中断后续阶段, 但记入 stage_errors, 管道终态不得报成功。
+    _sync_stock_instruments(repo, emit, stage_errors, start_pct=2, done_pct=8)
 
     emit("resolve_universe", 9, "解析标的池…")
     universe = _resolve_universe(capset, repo)
@@ -1002,6 +1003,27 @@ def _refresh_instruments_view(repo: KlineRepository) -> None:
     repo.refresh_view("instruments", f"{d}/instruments/**/*.parquet")
 
 
+def _sync_stock_instruments(
+    repo: KlineRepository,
+    emit: ProgressCb,
+    stage_errors: list[str] | None,
+    *,
+    start_pct: int,
+    done_pct: int,
+) -> dict:
+    """同步个股维表并按真实结果汇报。部分/失败不会写成「同步完成」。"""
+    emit("sync_instruments", start_pct, "同步个股维表…")
+    report = instrument_sync.sync_instruments_result(repo.store.data_dir)
+    if report.written:
+        _refresh_instruments_view(repo)
+    payload = report.as_dict()
+    emit("sync_instruments", done_pct, report.message)
+    if report.status != "ok" and stage_errors is not None:
+        stage_errors.append(report.message)
+    _invalidate("instruments")
+    return payload
+
+
 def _push_phase_change_alert(data_dir) -> None:
     """情绪周期阶段切换 → 推送监控通知(SSE toast + 监控中心)。
 
@@ -1066,9 +1088,10 @@ def _run_tracked(fn, job_label: str) -> bool:
     except JobCancelledError:
         # 已由 terminate() 标记失败(卡死/手动取消), 拉取线程在分块回调处自行退出
         logger.warning("scheduled %s cancelled: job_id=%s", job_label, job_id)
-    except Exception:
+    except Exception as e:
         logger.exception("scheduled %s failed: job_id=%s", job_label, job_id)
-        job_store.fail(job_id, f"scheduled {job_label} failed")
+        detail = str(e).strip() or f"scheduled {job_label} failed"
+        job_store.fail(job_id, detail)
     finally:
         release_run_slot(job_id)
     return succeeded
@@ -1336,11 +1359,7 @@ def start_scheduler(repo: KlineRepository, capset: CapabilitySet) -> AsyncIOSche
 
     # 盘前: 同步 instruments（时间由偏好决定）
     def _instruments_task(on_progress=None):
-        emit = on_progress or _noop
-        emit("sync_instruments", 0, "同步个股维表…")
-        result = run_instruments_sync(repo)
-        emit("done", 100, f"个股维表同步完成,{result.get('instruments_rows', 0)} 只标的")
-        return result
+        return run_instruments_sync(repo, on_progress=on_progress)
 
     scheduler.add_job(
         lambda: _run_tracked(_instruments_task, "instruments_sync"),

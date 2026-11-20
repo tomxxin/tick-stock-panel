@@ -615,7 +615,12 @@ def test_pipeline_self_heals_snapshot_day(tmp_path, monkeypatch):
     _write_full_partition(tmp_path, "kline_daily_enriched", today, _ts_ms(today, time(10, 0)))
 
     # 网络函数离线化: 维表同步 + 日K batch 拉取(记录参数)
-    monkeypatch.setattr(instrument_sync, "sync_instruments", lambda data_dir: 0)
+    monkeypatch.setattr(
+        instrument_sync, "sync_instruments_result",
+        lambda data_dir: instrument_sync.InstrumentSyncResult(
+            0, False, "ok", message="个股维表同步完成,0 只标的",
+        ),
+    )
     batch_calls: list[dict] = []
 
     def _fake_batch(universe, repo, capset, start_date=None, end_date=None, on_chunk_done=None):

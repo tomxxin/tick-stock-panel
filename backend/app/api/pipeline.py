@@ -25,6 +25,23 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/pipeline", tags=["pipeline"])
 
 
+@router.post("/sync-instruments")
+async def sync_stock_instruments(request: Request) -> dict:
+    """只重拉个股维表, 不跑日K、财务和其余管道阶段。
+
+    单个交易所失败时保留该市场上次有效名称, 任务终态为 failed。
+    三个交易所都成功时任务 succeeded。已有数据任务在跑时复用该任务。
+    """
+    repo = request.app.state.repo
+    return await _submit_job(
+        repo,
+        getattr(request.app.state, "quote_service", None),
+        lambda progress: (
+            lambda: daily_pipeline.run_instruments_sync(repo, on_progress=progress)
+        ),
+    )
+
+
 @router.post("/run")
 async def run_now(request: Request) -> dict:
     """异步触发盘后管道,立即返回 job_id。客户端轮询 /jobs/{id} 拿进度。"""

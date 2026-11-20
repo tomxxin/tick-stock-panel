@@ -25,7 +25,12 @@ def _run_pipeline(tmp_path: Path, monkeypatch, minute_provider: str) -> tuple[di
         "minute_sync_days": 5, "minute_data_provider": minute_provider,
         "adj_factor_provider": "tickflow",
     })
-    monkeypatch.setattr(daily_pipeline.instrument_sync, "sync_instruments", lambda *_: 0)
+    monkeypatch.setattr(
+        daily_pipeline.instrument_sync, "sync_instruments_result",
+        lambda *_: daily_pipeline.instrument_sync.InstrumentSyncResult(
+            0, False, "ok", message="个股维表同步完成,0 只标的",
+        ),
+    )
     monkeypatch.setattr(daily_pipeline, "_resolve_universe", lambda *_: [])
     monkeypatch.setattr(daily_pipeline, "_invalidate", lambda *_: None)
     monkeypatch.setattr(daily_pipeline, "_refresh_views", lambda *_: None)
