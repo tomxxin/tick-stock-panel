@@ -841,6 +841,44 @@ export interface AuctionBenchmarkPayload {
   items?: AuctionBenchmarkItem[]
 }
 
+export interface AuctionScanRow {
+  thscode: string
+  ticker?: string | null
+  name?: string | null
+  auction_pct?: number | null
+  auction_volume_ratio?: number | null
+  auction_volume?: number | null
+  auction_price?: number | null
+}
+
+export interface AuctionScanCoverage {
+  eligible: number
+  returned: number
+  missing_codes?: string[]
+  failed_batches?: Array<{ index: number; code?: string | number | null }>
+}
+
+export interface AuctionScanPayload {
+  display_date: string
+  is_today: boolean
+  state: string
+  rows: AuctionScanRow[]
+  coverage?: AuctionScanCoverage | null
+  collected_at?: string | null
+  running?: boolean
+  now?: string
+  last_run?: { status?: string; message?: string | null; error_code?: string | number | null } | null
+  unverified?: {
+    label: string
+    started_at?: string | null
+    rows?: AuctionScanRow[]
+    coverage?: AuctionScanCoverage | null
+  } | null
+  settings?: { enabled: boolean; min_pct: number; min_volume_ratio: number }
+  message?: string | null
+  settings_href?: string | null
+}
+
 // ===== Strategy Engine =====
 /** 参数级联显隐条件 (UI 元数据, 后端原样透传)。三种形态可递归组合:
  *  { param, in } — values[param] ∈ in;  { all: [...] } — 全部成立;  { any: [...] } — 任一成立 */
@@ -4646,6 +4684,20 @@ export const api = {
   auctionBenchmark: (date?: string) =>
     request<AuctionBenchmarkPayload>(
       `/api/market-recap/auction-benchmark${date ? `?date=${encodeURIComponent(date)}` : ''}`,
+    ),
+
+  auctionScan: (date?: string) =>
+    request<AuctionScanPayload>(
+      `/api/abnormal/auction-scan${date ? `?date=${encodeURIComponent(date)}` : ''}`,
+    ),
+
+  auctionScanRun: () =>
+    request<Record<string, unknown>>('/api/abnormal/auction-scan/run', { method: 'POST' }),
+
+  auctionScanSettings: (body: { enabled: boolean; min_pct: number; min_volume_ratio: number }) =>
+    request<{ enabled: boolean; min_pct: number; min_volume_ratio: number }>(
+      '/api/abnormal/auction-scan/settings',
+      { method: 'PUT', body: JSON.stringify(body) },
     ),
 
   reviewReportSave: (r: {

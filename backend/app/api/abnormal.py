@@ -5,8 +5,12 @@
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Query, Request
+from datetime import date as date_cls
 
+from fastapi import APIRouter, HTTPException, Query, Request
+from pydantic import BaseModel
+
+from app.services import auction_scan
 from app.services.abnormal_moves import build_intraday, build_overview
 
 router = APIRouter(prefix="/api/abnormal", tags=["abnormal"])
@@ -35,3 +39,40 @@ def abnormal_overview(
     repo = request.app.state.repo
     quote_service = getattr(request.app.state, "quote_service", None)
     return build_overview(repo, quote_service, min_closeness=min_closeness, limit=limit)
+
+
+class AuctionScanSettingsIn(BaseModel):
+    enabled: bool
+    min_pct: float
+    min_volume_ratio: float
+
+
+@router.get("/auction-scan")
+def auction_scan_view(date: str | None = None) -> dict:
+    """今日有效竞价终态。date 只用于明确查看某一天，缺省是上海时间今天。"""
+    today = auction_scan.cn_now().date()
+    on_date = None
+    if date:
+        try:
+            on_date = date_cls.fromisoformat(date)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="date 必须是 YYYY-MM-DD") from exc
+    return auction_scan.view_scan(auction_scan._root(), today=today, on_date=on_date)
+
+
+@router.post("/auction-scan/run")
+def auction_scan_run() -> dict:
+    """手动采集。窗口外的结果只记为未核验。"""
+    return auction_scan.run_manual()
+
+
+@router.get("/auction-scan/settings")
+def auction_scan_settings() -> dict:
+    return auction_scan.get_settings()
+
+
+@router.put("/auction-scan/settings")
+def auction_scan_settings_save(body: AuctionScanSettingsIn) -> dict:
+    return auction_scan.save_settings(
+        enabled=body.enabled, min_pct=body.min_pct, min_volume_ratio=body.min_volume_ratio,
+    )

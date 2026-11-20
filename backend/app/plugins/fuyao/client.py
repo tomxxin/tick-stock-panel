@@ -326,6 +326,19 @@ class FuyaoClient:
             params["date"] = date
         return self._get("/api/a-share/auction/short-term-benchmark", params)
 
+    def auction_snapshot(self, thscodes: list[str], stage: str = "final") -> dict:
+        """A 股集合竞价快照。thscodes 去重前最多 100 个；stage 只使用 final。
+
+        返回 data 容器：timestamp、auction_phase、data_status、total、item。
+        文档没有日期参数，timestamp 是响应组装时间。
+        """
+        if len(thscodes) > 100:
+            raise FuyaoError("集合竞价快照单次最多 100 个代码", code=1003)
+        return self._get(
+            "/api/a-share/auction/snapshot",
+            {"thscodes": ",".join(thscodes), "stage": stage},
+        )
+
     # ---- 市场 dump ----
     def dump_download_url(self, dump_kind: str) -> dict:
         """获取 dump 预签名下载信息(约 300s 有效)。
